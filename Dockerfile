@@ -1,42 +1,37 @@
-FROM composer:2.2.6 AS deps-php
-WORKDIR /app
-COPY composer.* /app/
-COPY database/ /app/database/
-RUN composer install --no-scripts --optimize-autoloader --ignore-platform-reqs --prefer-install=dist
-
-
-FROM node:latest AS deps-js
-WORKDIR /app
-COPY package*.json /app/
-RUN npm ci --unsafe-perm
-
-
-FROM php:8-fpm
-WORKDIR /var/www
-COPY --from=deps-php /app /var/www
-COPY --from=deps-js /app /var/www
-COPY . /var/www
+FROM php:8.2-apache
 
 RUN apt-get update && apt-get install -y \
-    curl \
-    libpng-dev libonig-dev libxml2-dev \
-    zip unzip
+    git \
+    unzip \
+    libzip-dev \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
+    libonig-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip \
+    && a2enmod rewrite \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r app \
-    && useradd -m -r -g app app \
-    && find . \! -user app -exec chown app '{}' +
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+WORKDIR /var/www/html
 
-RUN chmod +x /var/www/start.sh \
-    && chown -R app:app /var/www/storage /var/www/bootstrap/cache \
-    && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
+COPY . .
 
-USER app
+RUN composer install --no-dev --optimize-autoloader --no-interaction
 
-RUN php artisan storage:link || true
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
+    && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-EXPOSE 8000
-CMD ["/var/www/start.sh"]
+RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 80
+
+ENTRYPOINT ["/entrypoint.sh"]
