@@ -19,14 +19,15 @@ WORKDIR /var/www/html
 
 COPY . .
 
+RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
+
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
-    && chown -R www-data:www-data storage bootstrap/cache \
+RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
 RUN printf '#!/bin/bash\nset -e\ncd /var/www/html\nif [ ! -f .env ]; then cp .env.example .env; fi\nif [ -z "$APP_KEY" ]; then php artisan key:generate --force; fi\nphp artisan migrate --force || true\nphp artisan config:cache || true\nphp artisan route:cache || true\nphp artisan view:cache || true\nphp artisan storage:link || true\nsed -i "s/80/${PORT:-80}/g" /etc/apache2/ports.conf /etc/apache2/sites-available/000-default.conf\nexec apache2-foreground\n' > /entrypoint.sh \
